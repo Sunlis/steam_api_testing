@@ -17,6 +17,11 @@ config/icon="res://icon.svg"
 [autoload]
 
 Steamworks="*uid://bbjf3pp32y6i7"
+Friends="*uid://c0m6hr358fv8e"
+
+[debug]
+
+file_logging/enable_file_logging=true
 
 [display]
 
