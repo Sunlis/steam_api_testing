@@ -3,6 +3,8 @@ extends Node
 signal friend_list_changed
 signal friend_info_changed(id: int, info: UserInfo)
 
+var _logger = Log.new("friends.gd")
+
 class UserInfo:
   var steam_id: int = -1
   var persona_name: String = ""
@@ -14,25 +16,46 @@ class UserInfo:
     self.steam_id = id
 
   func _to_string() -> String:
-    return "{UserInfo %d %s %s %d}" % [steam_id, persona_name, online, game_played]
+    return "{UserInfo id:%d name:%s online:%s game:%d - %s}" % [steam_id, persona_name, online, game_played, "avatar" if avatar != null else "no avatar"]
 
 var _friend_count: int = -1
 var _user_info = {}
 var _friends = Set.new()
+var _avatars = {}
 
 func _ready():
   Steam.persona_state_change.connect(_persona_state_change)
   Steam.avatar_loaded.connect(_avatar_loaded)
   var count = self.get_friend_count()
-  print("Friend count %d" % count)
+  _logger.print("Friend count %d" % count)
   var friend_ids = []
   for i in range(count):
     var steam_id = Steam.getFriendByIndex(i, Steam.FriendFlags.FRIEND_FLAG_IMMEDIATE)
     friend_ids.append(steam_id)
-    Steam.requestUserInformation(steam_id, false)
-  print("friends: ", friend_ids)
+    if not Steam.requestUserInformation(steam_id, false):
+      # data is cached, process immediately
+      _persona_state_change(steam_id, Steam.PersonaChange.PERSONA_CHANGE_NAME)
+      _get_user_avatar(steam_id)
+  # _logger.print("friends: %s" % [friend_ids])
+
+func _get_user_avatar(id: int):
+  if id in _avatars:
+    return _avatars[id]
+  var handle = Steam.getMediumFriendAvatar(id)
+  var size = Steam.getImageSize(handle)
+  var result = Steam.getImageRGBA(handle)
+  if not "success" in result or not result.success:
+    return
+  var image = Image.create_from_data(size.width, size.height, false, Image.FORMAT_RGBA8, result.buffer)
+  _avatars[id] = image
+  if not id in _user_info:
+    _user_info[id] = UserInfo.new(id)
+  var info = _user_info[id]
+  info.avatar = image
+  friend_info_changed.emit(id, info)
 
 func _avatar_loaded(id: int, width: int, data: PackedByteArray):
+  _logger.print("avatar loaded")
   var image = Image.create_from_data(width, width, false, Image.FORMAT_RGBA8, data)
   if not id in _user_info:
     _user_info[id] = UserInfo.new(id)
@@ -41,26 +64,27 @@ func _avatar_loaded(id: int, width: int, data: PackedByteArray):
   friend_info_changed.emit(id, info)
 
 func _persona_state_change(id: int, flags: Steam.PersonaChange):
+  if id <= 0:
+    return
   if not id in _user_info:
     _user_info[id] = UserInfo.new(id)
   var info = _user_info[id]
-  if Steam.getFriendRelationship(id) == Steam.FriendRelationship.FRIEND_RELATION_FRIEND:
-    _friends.add(info)
-    friend_list_changed.emit()
-  
   # https://godotsteam.com/classes/friends/#personachange
   info.persona_name = Steam.getFriendPersonaName(id)
-  info.online = Steam.getFriendPersonaState(id) != Steam.PersonaState.PERSONA_STATE_OFFLINE
+  info.online = Steam.getFriendPersonaState(id) == Steam.PersonaState.PERSONA_STATE_ONLINE
   var game = Steam.getFriendGamePlayed(id)
   if game:
     info.game_played = game.id
   else:
     info.game_played = -1
+  # if flags & Steam.PersonaChange.PERSONA_CHANGE_AVATAR:
+  #   # 1 == small size
+  #   Steam.getPlayerAvatar(1, id)
+  if Steam.getFriendRelationship(id) == Steam.FriendRelationship.FRIEND_RELATION_FRIEND:
+    _friends.add(info)
+    friend_list_changed.emit()
   friend_info_changed.emit(id, info)
-  if flags & Steam.PersonaChange.PERSONA_CHANGE_AVATAR:
-    # 1 == small size
-    Steam.getPlayerAvatar(1, id)
-  print("state change %s" % info)
+  _logger.print("state change %s" % info)
 
 func get_friend_count():
   if _friend_count == -1:

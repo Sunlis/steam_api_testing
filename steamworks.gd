@@ -19,7 +19,6 @@ var STATUS_STRINGS = {
 
 func _ready():
   # 480 demo app
-  # 1623730 palworld
   var resp = Steam.steamInitEx(480, true)
   var status: InitStatus = InitStatus[InitStatus.find_key(resp.status)]
   var s = STATUS_STRINGS[status]
